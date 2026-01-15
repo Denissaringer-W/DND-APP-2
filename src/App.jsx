@@ -8,7 +8,8 @@ import {
   onSnapshot,
   deleteDoc,
   updateDoc,
-  increment
+  increment,
+  arrayUnion
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -185,6 +186,8 @@ export default function App() {
   const [isFallbackImage, setIsFallbackImage] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [customOptionInput, setCustomOptionInput] = useState("");
+  const [players, setPlayers] = useState([]);
+  const playerNameRef = useRef(null);
 
   // Audio State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -202,6 +205,12 @@ export default function App() {
   const [lootLoading, setLootLoading] = useState(false);
   const [itemEffectLoading, setItemEffectLoading] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState(null);
+
+  useEffect(() => {
+    if (user && !playerNameRef.current) {
+      playerNameRef.current = `Spieler-${user.uid.slice(0, 5)}`;
+    }
+  }, [user]);
 
   const fetchWithRetry = async (url, options, retries = 3) => {
     let delay = 1000;
@@ -257,16 +266,32 @@ export default function App() {
     const logicRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, LOGIC_DOC_ID);
     const unsubscribe = onSnapshot(logicRef, (snap) => {
       if (snap.exists() && snap.data().day > 0) {
-        setGameState(snap.data());
+        const data = snap.data();
+        setGameState(data);
+        setPlayers(data.players || []);
         setIsNewGame(false);
       } else {
         setIsNewGame(true);
         setGameState(null);
+        setPlayers([]);
       }
       setLoading(false);
     }, () => setLoading(false));
     return () => unsubscribe();
   }, [user]);
+
+  // --- MULTIPLAYER PRESENCE ---
+  useEffect(() => {
+    if (!user || !gameState) return;
+    if (!playerNameRef.current) {
+      playerNameRef.current = `Spieler-${user.uid.slice(0, 5)}`;
+    }
+    const alreadyJoined = players.some(player => player.id === user.uid);
+    if (alreadyJoined) return;
+    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, LOGIC_DOC_ID), {
+      players: arrayUnion({ id: user.uid, name: playerNameRef.current })
+    }).catch(() => {});
+  }, [user, gameState, players]);
 
   // Visuals Sync
   useEffect(() => {
@@ -324,7 +349,8 @@ export default function App() {
       history: [],
       inventory: [],
       style: scenario.imagePromptStyle,
-      sanity: startSanity
+      sanity: startSanity,
+      players: []
     };
 
     // 2. Optimistic Update (Critical Fix: Prevents null access)
@@ -619,6 +645,19 @@ export default function App() {
               </button>
             </div>
           </header>
+          <div className="mb-6 flex flex-wrap items-center gap-3 text-xs uppercase tracking-widest text-gray-400">
+            <div className="flex items-center gap-2 bg-gray-900 px-3 py-2 rounded-full border border-gray-800">
+              <Users className="w-4 h-4 text-blue-400" />
+              <span>Mitspieler: {players.length || 1}</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(players.length ? players : [{ id: user?.uid || 'solo', name: playerNameRef.current || 'Solo' }]).map((player) => (
+                <span key={player.id} className="bg-gray-900/60 border border-gray-800 px-3 py-1 rounded-full text-gray-300">
+                  {player.name}
+                </span>
+              ))}
+            </div>
+          </div>
           {/* While generating, show loading overlay */}
           {isGenerating && (
             <div className="fixed inset-0 bg-black/80 flex flex-col items-center justify-center z-50 backdrop-blur-sm">
@@ -672,6 +711,15 @@ export default function App() {
             <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-widest text-white drop-shadow">
               <Brain className="w-3 h-3 mr-2" /> Nerven: {gameState.sanity}%
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-gray-400">
+            <Users className="w-4 h-4 text-blue-400" />
+            <span>Mitspieler:</span>
+            {(players.length ? players : [{ id: user?.uid || 'solo', name: playerNameRef.current || 'Solo' }]).map((player) => (
+              <span key={player.id} className="bg-gray-900/60 border border-gray-800 px-2 py-1 rounded-full text-gray-300">
+                {player.name}
+              </span>
+            ))}
           </div>
         </header>
 
